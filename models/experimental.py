@@ -225,7 +225,7 @@ class ONNX_TRT(nn.Module):
 
 class End2End(nn.Module):
     '''export onnx or tensorrt model with NMS operation.'''
-    def __init__(self, model, max_obj=100, iou_thres=0.45, score_thres=0.25, max_wh=None, device=None, n_classes=80):
+    def __init__(self, model, max_obj=100, iou_thres=0.45, score_thres=0.25, max_wh=None, device=None, n_classes=80, nhwc=False):
         super().__init__()
         device = device if device else torch.device('cpu')
         assert isinstance(max_wh,(int)) or max_wh is None
@@ -234,8 +234,12 @@ class End2End(nn.Module):
         self.patch_model = ONNX_TRT if max_wh is None else ONNX_ORT
         self.end2end = self.patch_model(max_obj, iou_thres, score_thres, max_wh, device, n_classes)
         self.end2end.eval()
+        self.nhwc = nhwc
 
     def forward(self, x):
+        # # An attempt to convert nhwc to nchw ahead of time. 
+        if self.nhwc: # nhwc -> nchw
+            x = x.permute(0, 3, 1, 2)
         x = self.model(x)
         x = self.end2end(x)
         return x
