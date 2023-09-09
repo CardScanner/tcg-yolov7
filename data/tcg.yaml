@@ -9,7 +9,7 @@ val: ./tcg/val.txt  # 5000 images
 # test: ./coco/test-dev2017.txt  # 20288 of 40670 images, submit to https://competitions.codalab.org/competitions/20794
 
 # number of classes
-nc: 1
+nc: 3
 
 # class names
-names: [ 'yugioh' ]
+names: [ 'yugioh', 'pokemon', 'magic' ]

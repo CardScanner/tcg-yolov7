@@ -23,6 +23,7 @@
 !setup.cfg
 !cfg/yolov3*.cfg
 tensorflow-model/*
+tcg/
 
 storage.googleapis.com
 runs/*
