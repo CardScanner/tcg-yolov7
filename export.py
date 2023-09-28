@@ -2,12 +2,15 @@ import argparse
 import sys
 import time
 import warnings
+import copy
 
 sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 
 import torch
 import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
+import torch.backends._nnapi.prepare
+
 
 import models
 from models.experimental import attempt_load, End2End
@@ -25,7 +28,10 @@ if __name__ == '__main__':
     parser.add_argument('--dynamic-batch', action='store_true', help='dynamic batch onnx for tensorrt and onnx-runtime')
     parser.add_argument('--grid', action='store_true', help='export Detect() layer grid')
     parser.add_argument('--end2end', action='store_true', help='export end2end onnx')
-    parser.add_argument('--nhwc', action='store_true', help='NHWC image format for ONNX end2end export')
+    parser.add_argument('--end2endnhwc', action='store_true', help='NHWC image format for ONNX end2end export')
+    # parser.add_argument('--ptlnhwc', action='store_true', help='NHWC image format for pytorch-lite export')
+    parser.add_argument('--ptlnnapi', action='store_true', help='for pytorch-lite nnapi export for Android')
+    parser.add_argument('--ptlquantized', action='store_true', help='for pytorch-lite quantize to qint8')
     parser.add_argument('--max-wh', type=int, default=None, help='None for tensorrt nms, int value for onnx-runtime nms')
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
@@ -106,9 +112,54 @@ if __name__ == '__main__':
     # TorchScript-Lite export
     try:
         print('\nStarting TorchScript-Lite export with torch %s...' % torch.__version__)
-        f = opt.weights.replace('.pt', '.torchscript.ptl')  # filename
-        tsl = torch.jit.trace(model, img, strict=False)
-        tsl = optimize_for_mobile(tsl)
+        ptlimg = img
+        ptlmodel = copy.deepcopy(model)
+
+        if opt.grid:
+            if opt.end2end:
+                ptlmodel = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_wh,device,len(labels), opt.end2endnhwc)
+                if opt.end2end and opt.max_wh is None:
+                    output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
+                    shapes = [opt.batch_size, 1, opt.batch_size, opt.topk_all, 4,
+                              opt.batch_size, opt.topk_all, opt.batch_size, opt.topk_all]
+                else:
+                    output_names = ['output']
+            else:
+                ptlmodel.model[-1].concat = True
+
+        if opt.ptlnnapi:    
+            # convert leaky relu to relu
+            def convert_model_to_nnapi(ptlmodel):
+                for child_name, child in ptlmodel.named_children():
+                    if isinstance(child, nn.LeakyReLU):
+                        setattr(ptlmodel, child_name, nn.ReLU())
+                    else:
+                        convert_model_to_nnapi(child)
+
+            
+            convert_model_to_nnapi(ptlmodel)
+
+            f = opt.weights.replace('.pt', '.torchscript.nnapi.ptl')  # filename
+            pltimg = ptlimg.contiguous(memory_format=torch.channels_last)  # NNAPI
+            ptlimg.nnapi_nhwc = True
+            tsl = torch.jit.trace(ptlmodel, ptlimg, strict=False)
+
+            torch.backends._nnapi.prepare.convert_model_to_nnapi(tsl, ptlimg)
+        else:
+            f = opt.weights.replace('.pt', '.torchscript.ptl')  # filename
+            tsl = None
+            if opt.ptlquantized:
+                quantized = torch.quantization.convert(ptlmodel)
+                tsl = torch.jit.trace(quantized, ptlimg, strict=False)
+            else:
+                tsl = torch.jit.trace(ptlmodel, ptlimg, strict=False)
+            
+            # # export opnames
+            # ops = torch.jit.export_opnames(tsl)
+            # with open('ptl-ops.yaml', 'w') as output:
+            #     yaml.dump(ops, output)
+            
+            tsl = optimize_for_mobile(tsl, backend='CPU')
         tsl._save_for_lite_interpreter(f)
         print('TorchScript-Lite export success, saved as %s' % f)
     except Exception as e:
@@ -147,7 +198,7 @@ if __name__ == '__main__':
         if opt.grid:
             if opt.end2end:
                 print('\nStarting export end2end onnx model for %s...' % 'TensorRT' if opt.max_wh is None else 'onnxruntime')
-                model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_wh,device,len(labels), opt.nhwc)
+                model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,opt.max_wh,device,len(labels), opt.end2endnhwc)
                 if opt.end2end and opt.max_wh is None:
                     output_names = ['num_dets', 'det_boxes', 'det_scores', 'det_classes']
                     shapes = [opt.batch_size, 1, opt.batch_size, opt.topk_all, 4,
@@ -158,7 +209,7 @@ if __name__ == '__main__':
                 model.model[-1].concat = True
 
         onnx_img = img
-        if opt.end2end and opt.max_wh and opt.nhwc:
+        if opt.end2end and opt.max_wh and opt.end2endnhwc:
             onnx_img = onnx_img.permute(0, 2, 3, 1)
 
         torch.onnx.export(model, onnx_img, f, verbose=False, opset_version=12, input_names=['images'],
@@ -196,6 +247,13 @@ if __name__ == '__main__':
         # print(onnx.helper.printable_graph(onnx_model.graph))  # print a human readable model
         onnx.save(onnx_model,f)
         print('ONNX export success, saved as %s' % f)
+        
+        output =[node.name for node in onnx_model.graph.output]
+        input_all = [node.name for node in onnx_model.graph.input]
+        input_initializer =  [node.name for node in onnx_model.graph.initializer]
+        net_feed_input = list(set(input_all)  - set(input_initializer))
+        print('ONNX Inputs: ', net_feed_input)
+        print('ONNX Outputs: ', output)
 
         if opt.include_nms:
             print('Registering NMS plugin for ONNX...')
@@ -207,5 +265,4 @@ if __name__ == '__main__':
         print('ONNX export failure: %s' % e)
 
     # Finish
-    print(opt.nhwc)
     print('\nExport complete (%.2fs). Visualize with https://github.com/lutzroeder/netron.' % (time.time() - t))

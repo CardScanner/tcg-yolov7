@@ -1,0 +1,101 @@
+- aten::_convolution
+- aten::add.Tensor
+- aten::cat
+- aten::contiguous
+- aten::copy_
+- aten::leaky_relu_
+- aten::max_pool2d
+- aten::mul.Tensor
+- aten::permute
+- aten::pow.Tensor_Scalar
+- aten::select.int
+- aten::sigmoid
+- aten::size.int
+- aten::slice.Tensor
+- aten::sub.Tensor
+- aten::upsample_nearest2d.vec
+- aten::view
+- prim::TupleUnpack
+
+{
+        "prim::GetAttr": lambda self, node:
+            self.add_getattr(node),
+        "prim::Constant": lambda self, node:
+            self.add_constant_node(node),
+        "prim::ListConstruct": lambda self, node:
+            self.add_list_construct(node),
+        "prim::TupleConstruct": lambda self, node:
+            self.add_tuple_construct(node),
+        "aten::unsqueeze": lambda self, node:
+            self.add_unsqueeze(node),
+        "aten::to": lambda self, node:
+            self.add_to(node),
+        "aten::detach": lambda self, node:
+            self._identity(node),
+        "aten::reshape": lambda self, node:
+            self.add_reshape(node),
+        "aten::flatten": lambda self, node:
+            self.add_flatten(node),
+        "aten::slice": lambda self, node:
+            self.add_slice(node),
+        "aten::size": lambda self, node:
+            self.add_size(node),
+        "aten::cat": lambda self, node:
+            self.add_cat(node),
+        "aten::mean": lambda self, node:
+            self.add_mean(node),
+        "aten::quantize_per_tensor": lambda self, node:
+            self.add_quantize(node),
+        "aten::dequantize": lambda self, node:
+            self.add_dequantize(node),
+        "aten::add": lambda self, node:
+            self.add_add_sub_op(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
+        "aten::sub": lambda self, node:
+            self.add_add_sub_op(node, NNAPI_OperationCode.SUB, NNAPI_FuseCode.FUSED_NONE),
+        "aten::mul": lambda self, node:
+            self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
+        "aten::div": lambda self, node:
+            self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.DIV, NNAPI_FuseCode.FUSED_NONE),
+        "aten::relu": lambda self, node:
+            self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.RELU),
+        "aten::sigmoid": lambda self, node:
+            self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.LOGISTIC),
+        "aten::softmax": lambda self, node:
+            self.add_softmax(node),
+        "aten::hardtanh": lambda self, node:
+            self.add_hardtanh(node),
+        "aten::avg_pool2d": lambda self, node:
+            self.add_avg_pool2d(node),
+        "aten::max_pool2d": lambda self, node:
+            self.add_pool2d_node(node, NNAPI_OperationCode.MAX_POOL_2D),
+        "aten::adaptive_avg_pool2d": lambda self, node:
+            self.add_adaptive_avg_pool2d(node),
+        "aten::upsample_nearest2d": lambda self, node:
+            self.add_upsample_nearest2d(node),
+        "aten::prelu": lambda self, node:
+            self.add_prelu_op(node),
+        "aten::addmm": lambda self, node:
+            self.add_addmm(node),
+        "aten::linear": lambda self, node:
+            self.add_linear(node),
+        "aten::_convolution": lambda self, node:
+            self.add_conv_underscore(node),
+        "aten::conv2d": lambda self, node:
+            self.add_conv2d(node),
+        "aten::log_softmax": lambda self, node:
+            self.add_log_softmax(node),
+        "quantized::linear": lambda self, node:
+            self.add_qlinear(node),
+        "quantized::conv2d": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE),
+        "quantized::conv2d_relu": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::conv_transpose2d": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE, transpose=True),
+        "quantized::add": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
+        "quantized::add_relu": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::mul": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
+    }
